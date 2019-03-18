@@ -1,8 +1,9 @@
 # Copyright (c) 2018 Ultimaker
 # !/usr/bin/env python
 # -*- coding: utf-8 -*-
+import asyncio
 import logging
-from time import sleep
+import threading
 
 from mongoOperator.ClusterManager import ClusterManager
 
@@ -22,18 +23,21 @@ class MongoOperator:
         """
         Runs the mongo operator forever (until a kill command is received).
         """
-        checker = ClusterManager()
+
+        clusterManager = ClusterManager()
+
+        thread = threading.Thread(target=clusterManager.checkAndBackupIfNeeded)
+        thread.start()
+        logging.info("Scheduled backup check every 10 seconds,")
+
+        logging.info("Starting operator ioloop processing events")
         try:
-            while True:
-                logging.info("**** Running Cluster Check ****")
-                try:
-                    checker.checkExistingClusters()
-                    checker.collectGarbage()
-                except Exception as global_exception:
-                    logging.exception(global_exception)
-                    raise
-                logging.info("Checks done, waiting %s seconds", self._sleep_per_run)
-                sleep(self._sleep_per_run)
+            ioloop = asyncio.get_event_loop()
+
+            ioloop.create_task(clusterManager.pods())
+            ioloop.create_task(clusterManager.statefulsets())
+            ioloop.run_forever()
         except KeyboardInterrupt:
             logging.info("Application interrupted...")
         logging.info("Done running operator")
+

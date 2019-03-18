@@ -1,7 +1,8 @@
 # Copyright (c) 2018 Ultimaker
 # !/usr/bin/env python
 # -*- coding: utf-8 -*-
-import os
+from os import urandom
+
 from base64 import b64encode
 
 from kubernetes.client import V1Secret, V1Status
@@ -30,9 +31,13 @@ class AdminSecretChecker(BaseResourceChecker):
         return cls.NAME_FORMAT.format(cluster_name)
 
     @staticmethod
-    def _generateSecretData() -> Dict[str, str]:
-        """Generates a root user with a random secure password to use in secrets."""
-        return {"username": "root", "password": b64encode(os.urandom(33)).decode()}
+    def _generateSecretData(cluster_object: V1MongoClusterConfiguration) -> Dict[str, str]:
+        """Generates secret with admin password to use and configured user, pass and dbname."""
+        return {"database-admin-password": cluster_object.spec.users.admin_password,
+                "database-user": cluster_object.spec.users.user_name,
+                "database-password": cluster_object.spec.users.user_password,
+                "database-name": cluster_object.spec.users.database_name
+                }
 
     def listResources(self) -> List[V1Secret]:
         return self.kubernetes_service.listAllSecretsWithLabels().items
@@ -43,11 +48,11 @@ class AdminSecretChecker(BaseResourceChecker):
 
     def createResource(self, cluster_object: V1MongoClusterConfiguration) -> V1Secret:
         name = self.getSecretName(cluster_object.metadata.name)
-        return self.kubernetes_service.createSecret(name, cluster_object.metadata.namespace, self._generateSecretData())
+        return self.kubernetes_service.createSecret(name, cluster_object.metadata.namespace, self._generateSecretData(cluster_object=cluster_object))
 
     def updateResource(self, cluster_object: V1MongoClusterConfiguration) -> V1Secret:
         name = self.getSecretName(cluster_object.metadata.name)
-        return self.kubernetes_service.updateSecret(name, cluster_object.metadata.namespace, self._generateSecretData())
+        return self.kubernetes_service.updateSecret(name, cluster_object.metadata.namespace, self._generateSecretData(cluster_object=cluster_object))
 
     def deleteResource(self, cluster_name: str, namespace: str) -> V1Status:
         secret_name = self.getSecretName(cluster_name)

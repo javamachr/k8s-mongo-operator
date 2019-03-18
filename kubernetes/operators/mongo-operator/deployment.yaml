@@ -1,10 +1,10 @@
-apiVersion: apps/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
     app: mongo-operator
   name: mongo-operator
-  namespace: mongo-operator-cluster
+  namespace: bm-cz
 spec:
   replicas: 1
   revisionHistoryLimit: 2
@@ -21,10 +21,22 @@ spec:
         app: mongo-operator
     spec:
       containers:
-      - image: ultimaker/k8s-mongo-operator:local
-        imagePullPolicy: Never
+      - image: docker-registry.default.svc:5000/base-images/k8s-mongo-operator:1.0.0
+        imagePullPolicy: Always
         name: mongo-operator
         env:
         - name: LOGGING_LEVEL
-          value: DEBUG
+          value: INFO
+        - name: KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: metadata.namespace
+        volumeMounts:
+          - name: backup-data
+            mountPath: /data
       serviceAccount: mongo-operator-service-account
+      volumes:
+        - name: backup-data
+          persistentVolumeClaim:
+            claimName: pvc-bmcz-mongobck

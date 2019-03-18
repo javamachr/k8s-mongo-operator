@@ -51,6 +51,7 @@ class MongoService:
         create_status_command = MongoResources.createStatusCommand()
 
         try:
+            logging.debug("Will execute status command.")
             create_status_response = self._executeAdminCommand(cluster_object, create_status_command)
             logging.debug("Checking replicas, received %s", repr(create_status_response))
 
@@ -67,10 +68,13 @@ class MongoService:
                 self._reconfigureReplicaSet(cluster_object)
 
         except OperationFailure as err:
+            logging.debug("Failed with %s", err)
             if str(err) != self.NO_REPLICA_SET_RESPONSE:
+                logging.debug("No replicaset response.")
                 raise
 
             # If the replica set is not initialized yet, we initialize it
+            logging.debug("Replicaset is not initialized, will initialize now.")
             self._initializeReplicaSet(cluster_object)
 
     def createUsers(self, cluster_object: V1MongoClusterConfiguration) -> None:
@@ -140,7 +144,11 @@ class MongoService:
         cluster_name = cluster_object.metadata.name
         namespace = cluster_object.metadata.namespace
 
-        master_connection = MongoClient(MongoResources.getMemberHostname(0, cluster_name, namespace))
+        logging.debug("Will initialize replicaset now.")
+        master_connection = MongoClient(MongoResources.getMemberHostname(0, cluster_name, namespace),
+                                        username='admin',
+                                        password=cluster_object.spec.users.admin_password,
+                                        authSource='admin')
         create_replica_command, create_replica_args = MongoResources.createReplicaInitiateCommand(cluster_object)
         create_replica_response = master_connection.admin.command(create_replica_command, create_replica_args)
 
@@ -157,18 +165,17 @@ class MongoService:
         Creates a new MongoClient instance for a replica set.
         :return: The mongo client.
         """
-        return MongoClient(
-            MongoResources.getMemberHostnames(cluster_object),
-            connectTimeoutMS = 120000,
-            serverSelectionTimeoutMS = 120000,
-            replicaSet = cluster_object.metadata.name,
-            event_listeners = [
-                CommandLogger(),
-                ServerLogger(),
-                TopologyListener(cluster_object, replica_set_ready_callback=self._onReplicaSetReady),
-                HeartbeatListener(cluster_object, all_hosts_ready_callback=self._onAllHostsReady)
-            ]
-        )
+        logging.info("Creating MongoClient for replicaset %s.", cluster_object.metadata.name)
+        client = MongoClient(MongoResources.getMemberHostnames(cluster_object), connectTimeoutMS=120000,
+                             serverSelectionTimeoutMS=120000, replicaSet=cluster_object.metadata.name, username='admin',
+                             password=cluster_object.spec.users.admin_password, authSource='admin',
+                             event_listeners=[CommandLogger(),
+                                              ServerLogger(),
+                                              TopologyListener(cluster_object, replica_set_ready_callback=self._onReplicaSetReady),
+                                              HeartbeatListener(cluster_object, all_hosts_ready_callback=self._onAllHostsReady)]
+                             )
+        logging.info("Created mongoclient connected to %s.", client.address)
+        return client
 
     def _onReplicaSetReady(self, cluster_object: V1MongoClusterConfiguration) -> None:
         """
@@ -201,6 +208,7 @@ class MongoService:
         :raise ValueError: If the result could not be parsed.
         :raise TimeoutError: If we could not connect after retrying.
         """
+        logging.info("Execution of admin command %s in %d connected replicas.", mongo_command, self._connected_replica_sets.__len__())
         for _ in range(self.MONGO_COMMAND_RETRIES):
             try:
                 name = cluster_object.metadata.name

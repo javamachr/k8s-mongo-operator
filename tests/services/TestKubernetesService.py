@@ -32,9 +32,7 @@ class TestKubernetesService(TestCase):
         self.name = self.cluster_object.metadata.name
         self.namespace = self.cluster_object.metadata.namespace
         self.cpu_limit = "100m"
-        self.cpu_request = "0.5"
         self.memory_limit = "64Mi"
-        self.memory_request = "1Gi"
         self.stateful_set = self._createStatefulSet()
 
     def _createStatefulSet(self) -> V1beta1StatefulSet:
@@ -87,7 +85,7 @@ class TestKubernetesService(TestCase):
     def _createResourceLimits(self) -> V1ResourceRequirements:
         return V1ResourceRequirements(
             limits={"cpu": self.cpu_limit, "memory": self.memory_limit},
-            requests={"cpu": self.cpu_request, "memory": self.memory_request}
+            requests={"cpu": self.cpu_limit, "memory": self.memory_limit}
         )
 
     def test___init__(self, client_mock):
@@ -112,9 +110,9 @@ class TestKubernetesService(TestCase):
         expected_def = V1beta1CustomResourceDefinition(
             api_version="apiextensions.k8s.io/v1beta1",
             kind="CustomResourceDefinition",
-            metadata=V1ObjectMeta(name="mongos.operators.ultimaker.com"),
+            metadata=V1ObjectMeta(name="mongos.operators.javamachr.cz"),
             spec=V1beta1CustomResourceDefinitionSpec(
-                group="operators.ultimaker.com", version="v1", scope="Namespaced",
+                group="operators.javamachr.cz", version="v1", scope="Namespaced",
                 names=V1beta1CustomResourceDefinitionNames(
                     plural="mongos", singular="mongo", kind="Mongo", short_names=["mng"]
                 )
@@ -160,7 +158,7 @@ class TestKubernetesService(TestCase):
         result = service.listMongoObjects(param="value")
         expected_calls = [
             call.ApiextensionsV1beta1Api().list_custom_resource_definition(),
-            call.CustomObjectsApi().list_cluster_custom_object("operators.ultimaker.com", "v1", "mongos", param="value")
+            call.CustomObjectsApi().list_cluster_custom_object("operators.javamachr.cz", "v1", "mongos", param="value")
         ]
         self.assertEqual(expected_calls, client_mock.mock_calls)
         self.assertEqual(client_mock.CustomObjectsApi().list_cluster_custom_object.return_value, result)
@@ -179,33 +177,9 @@ class TestKubernetesService(TestCase):
 
         expected_calls = [
             call.ApiextensionsV1beta1Api().list_custom_resource_definition(),
-            call.CustomObjectsApi().list_cluster_custom_object("operators.ultimaker.com", "v1", "mongos", param="value")
+            call.CustomObjectsApi().list_cluster_custom_object("operators.javamachr.cz", "v1", "mongos", param="value")
         ]
         self.assertEqual(expected_calls, client_mock.mock_calls)
-
-    def test_listMongoObjects_404(self, client_mock):
-        service = KubernetesService()
-        client_mock.reset_mock()
-
-        item = MagicMock()
-        item.spec.names.plural = "mongos"
-        client_mock.ApiextensionsV1beta1Api.return_value.list_custom_resource_definition.return_value.items = [item]
-        client_mock.CustomObjectsApi.return_value.list_cluster_custom_object.side_effect = ApiException(404)
-
-        with self.assertRaises(TimeoutError) as context:
-            service.listMongoObjects(param="value")
-
-        expected_calls = [
-            call.ApiextensionsV1beta1Api().list_custom_resource_definition(),
-            call.CustomObjectsApi().list_cluster_custom_object("operators.ultimaker.com", "v1", "mongos",
-                                                               param="value"),
-            call.CustomObjectsApi().list_cluster_custom_object("operators.ultimaker.com", "v1", "mongos",
-                                                               param="value"),
-            call.CustomObjectsApi().list_cluster_custom_object("operators.ultimaker.com", "v1", "mongos",
-                                                               param="value"),
-        ]
-        self.assertEqual(expected_calls, client_mock.mock_calls)
-        self.assertEqual("Could not list the custom mongo objects after 3 retries", str(context.exception))
 
     def test_getMongoObject(self, client_mock):
         service = KubernetesService()
@@ -213,7 +187,7 @@ class TestKubernetesService(TestCase):
 
         result = service.getMongoObject(self.name, self.namespace)
         expected_calls = [call.CustomObjectsApi().get_namespaced_custom_object(
-            "operators.ultimaker.com", "v1", self.namespace, "mongos", self.name
+            "javamachr.cz", "v1", self.namespace, "mongos", self.name
         )]
         self.assertEqual(expected_calls, client_mock.mock_calls)
         self.assertEqual(client_mock.CustomObjectsApi().get_namespaced_custom_object.return_value, result)
@@ -224,7 +198,7 @@ class TestKubernetesService(TestCase):
 
         result = service.listAllServicesWithLabels()
         expected_calls = [call.CoreV1Api().list_service_for_all_namespaces(
-            label_selector="operated-by=operators.ultimaker.com,heritage=mongos"
+            label_selector="operated-by=operators.javamachr.cz,heritage=mongos"
         )]
         self.assertEqual(expected_calls, client_mock.mock_calls)
         self.assertEqual(client_mock.CoreV1Api().list_service_for_all_namespaces.return_value, result)
@@ -247,7 +221,7 @@ class TestKubernetesService(TestCase):
 
         result = service.listAllStatefulSetsWithLabels()
         expected_calls = [call.AppsV1beta1Api().list_stateful_set_for_all_namespaces(
-            label_selector="operated-by=operators.ultimaker.com,heritage=mongos"
+            label_selector="operated-by=operators.javamachr.cz,heritage=mongos"
         )]
         self.assertEqual(expected_calls, client_mock.mock_calls)
         self.assertEqual(client_mock.AppsV1beta1Api().list_stateful_set_for_all_namespaces.return_value, result)
@@ -270,7 +244,7 @@ class TestKubernetesService(TestCase):
 
         result = service.listAllSecretsWithLabels()
         expected_calls = [call.CoreV1Api().list_secret_for_all_namespaces(
-            label_selector="operated-by=operators.ultimaker.com,heritage=mongos"
+            label_selector="operated-by=operators.javamachr.cz,heritage=mongos"
         )]
         self.assertEqual(expected_calls, client_mock.mock_calls)
         self.assertEqual(client_mock.CoreV1Api().list_secret_for_all_namespaces.return_value, result)
@@ -373,7 +347,7 @@ class TestKubernetesService(TestCase):
             spec=V1ServiceSpec(
                 cluster_ip="None",
                 ports=[V1ServicePort(name="mongod", port=27017, protocol="TCP")],
-                selector={"heritage": "mongos", "name": self.name, "operated-by": "operators.ultimaker.com"},
+                selector={"heritage": "mongos", "name": self.name, "operated-by": "operators.javamachr.cz"},
             )
         )
         expected_calls = [call.CoreV1Api().create_namespaced_service(self.namespace, expected_body)]
@@ -391,7 +365,7 @@ class TestKubernetesService(TestCase):
             spec=V1ServiceSpec(
                 cluster_ip="None",
                 ports=[V1ServicePort(name="mongod", port=27017, protocol="TCP")],
-                selector={"heritage": "mongos", "name": self.name, "operated-by": "operators.ultimaker.com"},
+                selector={"heritage": "mongos", "name": self.name, "operated-by": "operators.javamachr.cz"},
             )
         )
         result = service.updateService(self.cluster_object)
@@ -447,9 +421,7 @@ class TestKubernetesService(TestCase):
         del self.cluster_dict["spec"]["mongodb"]["cpu_limit"]
         del self.cluster_dict["spec"]["mongodb"]["memory_limit"]
         self.cpu_limit = "1"
-        self.cpu_request = "0.5"
         self.memory_limit = "2Gi"
-        self.memory_request = "1Gi"
         self.cluster_object = V1MongoClusterConfiguration(**self.cluster_dict)
         self.stateful_set = self._createStatefulSet()  # update with the new resource requirements
 

@@ -1,4 +1,4 @@
-apiVersion: "operators.ultimaker.com/v1"
+apiVersion: "operators.javamachr.cz/v1"
 kind: Mongo
 metadata:
   name: mongo-cluster
@@ -8,11 +8,11 @@ metadata:
 spec:
   mongodb:
     replicas: 5  # Must be between 3 and 50
+  users:
+    admin_password: admin
+    user_name: webapp
+    user_password: passwd1
+    databasename: fortunaweb
   backups:
     cron: "0 * * * *"  # every hour at 0 minutes
-    gcs:
-      bucket: "mongo-backups"
-      serviceAccount:
-        secretKeyRef:
-          key: json
-          name: storage-serviceaccount
+    restore_from: mongodb-backup-default-mongo-cluster-2019-02-07_132931.archive.gz

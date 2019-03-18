@@ -1,21 +1,22 @@
-apiVersion: "operators.ultimaker.com/v1"
+apiVersion: "operators.javamachr.cz/v1"
 kind: Mongo
 metadata:
   name: mongo-cluster
-  namespace: mongo-operator-cluster
+  namespace: bm-cz
   labels:
     app: mongo-cluster
 spec:
   mongodb:
     replicas: 3  # Must be between 3 and 50
-    cpu_limit: "100m"
-    memory_limit: "64Mi"
+    cpu_limit: "1000m"
+    memory_limit: "2048Mi"
+    run_as_user: 50002
+    service_account: hostpath
+    host_path: /mongodb/bm-cz/bet
+  users:
+    admin_password: admin
+    user_name: bm_app
+    user_password: FYc18rpX
+    database_name: fortunaweb
   backups:
-    cron: "0 * * * *"  # every hour at 0 minutes
-    gcs:
-      bucket: "ultimaker-mongo-backups"
-      prefix: "test-backups"
-      serviceAccount:
-        secretKeyRef:
-          name: storage-serviceaccount
-          key: json
+    cron: "10 3 * * *"  # every hour at 0 minutes

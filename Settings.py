@@ -12,7 +12,7 @@ class Settings:
     """
 
     # Custom resource (CRD) API config.
-    CUSTOM_OBJECT_API_GROUP = "operators.ultimaker.com"
+    CUSTOM_OBJECT_API_GROUP = "operators.javamachr.cz"
     CUSTOM_OBJECT_API_VERSION = "v1"
     CUSTOM_OBJECT_RESOURCE_PLURAL = "mongos"
 

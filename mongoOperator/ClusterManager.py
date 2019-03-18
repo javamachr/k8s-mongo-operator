@@ -1,12 +1,17 @@
 # Copyright (c) 2018 Ultimaker
 # !/usr/bin/env python
 # -*- coding: utf-8 -*-
+import asyncio
 import logging
+from time import sleep
 from typing import Dict, List, Tuple, Optional
+
+from kubernetes import watch
 
 from mongoOperator.helpers.resourceCheckers.AdminSecretChecker import AdminSecretChecker
 from mongoOperator.helpers.BackupHelper import BackupHelper
 from mongoOperator.helpers.resourceCheckers.BaseResourceChecker import BaseResourceChecker
+from mongoOperator.helpers.resourceCheckers.HeadlessServiceChecker import HeadlessServiceChecker
 from mongoOperator.helpers.resourceCheckers.ServiceChecker import ServiceChecker
 from mongoOperator.helpers.resourceCheckers.StatefulSetChecker import StatefulSetChecker
 from mongoOperator.models.V1MongoClusterConfiguration import V1MongoClusterConfiguration
@@ -23,9 +28,11 @@ class ClusterManager:
         self._mongo_service = MongoService(self._kubernetes_service)
         self._backup_checker = BackupHelper(self._kubernetes_service)
         self._resource_checkers: List[BaseResourceChecker] = [
+            HeadlessServiceChecker(self._kubernetes_service),
             ServiceChecker(self._kubernetes_service),
-            StatefulSetChecker(self._kubernetes_service),
             AdminSecretChecker(self._kubernetes_service),
+            StatefulSetChecker(self._kubernetes_service)
+
         ]
 
     def checkExistingClusters(self) -> None:
@@ -47,6 +54,32 @@ class ClusterManager:
         for checker in self._resource_checkers:
             checker.cleanResources()
 
+    async def pods(self):
+        w = watch.Watch()
+        for event in self._kubernetes_service.streamPodsOperatedByMe(watch=w):
+            logging.info("Received Event: %s %s %s" % (event['type'], event['object'].kind, event['object'].metadata.name))
+            self.checkExistingClusters()
+            self.collectGarbage()
+            await asyncio.sleep(0)
+
+    async def statefulsets(self):
+        w = watch.Watch()
+        for event in self._kubernetes_service.streamStatefulSetsOperatedByMe(watch=w):
+            logging.info("Received Event: %s %s %s" % (event['type'], event['object'].kind, event['object'].metadata.name))
+            self.checkExistingClusters()
+            self.collectGarbage()
+            await asyncio.sleep(0)
+
+    def checkAndBackupIfNeeded(self):
+        while True:
+            mongo_objects = self._kubernetes_service.listMongoObjects()
+            logging.debug("Checking backup job for %s mongo objects.", len(mongo_objects["items"]))
+            for cluster_dict in mongo_objects["items"]:
+                cluster_object = self._parseConfiguration(cluster_dict)
+                if cluster_object:
+                    self._backup_checker.backup_if_needed(cluster_object)
+            sleep(10)
+
     def _checkCluster(self, cluster_object: V1MongoClusterConfiguration, force: bool = False) -> None:
         """
         Checks whether the given cluster is configured and updated.
@@ -59,15 +92,18 @@ class ClusterManager:
             logging.debug("Cluster object %s has been checked already in version %s.",
                           key, cluster_object.metadata.resource_version)
             # we still want to check the replicas to make sure everything is working.
+            logging.debug("Will check replicas.")
             self._mongo_service.checkOrCreateReplicaSet(cluster_object)
         else:
+            logging.debug("Checking cluster %s now with all checkers.", cluster_object.metadata.name)
             for checker in self._resource_checkers:
                 checker.checkResource(cluster_object)
+            logging.debug("Checks of all checkers complete, will check replica.")
             self._mongo_service.checkOrCreateReplicaSet(cluster_object)
             self._mongo_service.createUsers(cluster_object)
             self._cluster_versions[key] = cluster_object.metadata.resource_version
 
-        self._backup_checker.backupIfNeeded(cluster_object)
+        #self._backup_checker.backup_if_needed(cluster_object)
 
     @staticmethod
     def _parseConfiguration(cluster_dict: Dict[str, any]) -> Optional[V1MongoClusterConfiguration]:

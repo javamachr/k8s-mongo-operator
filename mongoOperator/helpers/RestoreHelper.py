@@ -1,21 +1,16 @@
 # Copyright (c) 2018 Ultimaker
 # !/usr/bin/env python
 # -*- coding: utf-8 -*-
-import json
+import glob
 import logging
 import os
-from base64 import b64decode
 from subprocess import check_output, CalledProcessError
 
 from time import sleep
-from google.cloud.storage import Client as StorageClient
-from google.oauth2.service_account import Credentials as ServiceCredentials
 
 from mongoOperator.helpers.MongoResources import MongoResources
 from mongoOperator.models.V1MongoClusterConfiguration import V1MongoClusterConfiguration
 from mongoOperator.services.KubernetesService import KubernetesService
-
-from typing import Dict
 
 
 class RestoreHelper:
@@ -34,56 +29,16 @@ class RestoreHelper:
         """
         self.kubernetes_service = kubernetes_service
 
-    def _getCredentials(self, cluster_object: V1MongoClusterConfiguration) -> Dict[str, any]:
-        """
-        Retrieves the storage credentials for the given cluster object from the Kubernetes secret as specified in the
-        cluster object.
-        :param cluster_object: The cluster object from the YAML file.
-        :return: The credentials dictionary.
-        """
-        secret_key = cluster_object.spec.backups.gcs.service_account.secret_key_ref
-        secret = self.kubernetes_service.getSecret(secret_key.name, cluster_object.metadata.namespace)
-        credentials_encoded = secret.data[secret_key.key]
-        credentials_json = b64decode(credentials_encoded)
-        return json.loads(credentials_json)
-
-    def getLastBackupStorageObjectName(self, cluster_object: V1MongoClusterConfiguration) -> str:
-        """
-        Returns the filename of the last backup file in the bucket.
-        :param cluster_object: The cluster object from the YAML file.
-        :return: String containing the filename of the last backup.
-        """
-        prefix = cluster_object.spec.backups.gcs.prefix or self.DEFAULT_BACKUP_PREFIX
-        bucket_name = cluster_object.spec.backups.gcs.restore_bucket if cluster_object.spec.backups.gcs.restore_bucket \
-            else cluster_object.spec.backups.gcs.bucket
-        return self._lastBackupFile(
-            credentials=self._getCredentials(cluster_object),
-            bucket_name=bucket_name,
-            key="{}/".format(prefix)
-        )
-
     @staticmethod
-    def _lastBackupFile(credentials: dict, bucket_name: str, key: str) -> str:
+    def _lastBackupFile() -> str:
         """
-        Gets the name of the last backup file in the bucket.
-        :param credentials: The Google cloud storage service credentials retrieved from the Kubernetes secret.
-        :param bucket_name: The name of the bucket.
-        :param key: The prefix of tha backups
+        Gets the name of the last backup file in NFS folder.
         :return: The location of the last backup file.
         """
-        credentials = ServiceCredentials.from_service_account_info(credentials)
-        gcs_client = StorageClient(credentials.project_id, credentials)
-        bucket = gcs_client.get_bucket(bucket_name)
-        blobs = bucket.list_blobs(prefix=key)
-
-        last_blob = None
-        for blob in blobs:
-            logging.info("Found backup file '%s' in bucket '%s'", blob.name, bucket_name)
-            if last_blob is None or blob.time_created > last_blob.time_created:
-                last_blob = blob
-
-        logging.info("Returning backup file %s", last_blob.name.replace(key, ""))
-        return last_blob.name.replace(key, "") if last_blob else None
+        list_of_files = glob.glob('/data/mongodb-backup-*.gz')
+        latest_file = max(list_of_files, key=os.path.getctime)
+        logging.info("Returning backup file %s", latest_file)
+        return latest_file
 
     def restoreIfNeeded(self, cluster_object: V1MongoClusterConfiguration) -> bool:
         """
@@ -92,12 +47,12 @@ class RestoreHelper:
         :param cluster_object: The cluster object from the YAML file.
         :return: Whether a restore was executed or not.
         """
-        if cluster_object.spec.backups.gcs.restore_from is None:
+        if cluster_object.spec.backups.restore_from is None:
             return False
 
-        backup_file = cluster_object.spec.backups.gcs.restore_from
+        backup_file = cluster_object.spec.backups.restore_from
         if backup_file == self.LATEST_BACKUP_KEY:
-            backup_file = self.getLastBackupStorageObjectName(cluster_object)
+            backup_file = self._lastBackupFile()
 
         logging.info("Attempting to restore file %s to cluster %s @ ns/%s.", backup_file,
                      cluster_object.metadata.name, cluster_object.metadata.namespace)
@@ -108,7 +63,7 @@ class RestoreHelper:
     def restore(self, cluster_object: V1MongoClusterConfiguration, backup_file: str) -> bool:
         """
         Attempts to restore the latest backup in the specified location to the given cluster.
-        Creates a new backup for the given cluster saving it in the cloud storage.
+        Creates a new backup for the given cluster saving it in the NFS storage.
         :param cluster_object: The cluster object from the YAML file.
         :param backup_file: The filename of the backup we want to restore.
         """
@@ -117,21 +72,19 @@ class RestoreHelper:
         logging.info("Restoring backup file %s to cluster %s @ ns/%s.", backup_file, cluster_object.metadata.name,
                      cluster_object.metadata.namespace)
 
-        # Download the backup file from the bucket
-        downloaded_file = self._downloadBackup(cluster_object, backup_file)
-
         # Wait for the replica set to become ready
         for _ in range(self.RESTORE_RETRIES):
             try:
-                logging.info("Running mongorestore --host %s --gzip --archive=%s", ",".join(hostnames), downloaded_file)
-                restore_output = check_output(["mongorestore", "--host", ",".join(hostnames), "--gzip",
-                                               "--archive=" + downloaded_file])
+                logging.info("Running mongorestore --host %s --gzip --archive=%s", ",".join(hostnames), backup_file)
+                restore_output = check_output(["/opt/rh/rh-mongodb36/root/usr/bin/mongorestore", "--authenticationDatabase=admin", "-u", "admin",
+                                               "-p", cluster_object.spec.users.admin_password, "--host", ",".join(hostnames), "--gzip",
+                                               "--archive=" + backup_file])
                 logging.info("Restore output: %s", restore_output)
 
                 try:
-                    os.remove(downloaded_file)
+                    os.remove(backup_file)
                 except OSError as err:
-                    logging.error("Unable to remove '%s': %s", downloaded_file, err.strerror)
+                    logging.error("Unable to remove '%s': %s", backup_file, err.strerror)
 
                 return True
             except CalledProcessError as err:
@@ -139,39 +92,3 @@ class RestoreHelper:
                               backup_file, _, err.returncode, err.stderr, err.stdout)
                 sleep(self.RESTORE_WAIT)
         raise TimeoutError("Could not restore '{}' after {} retries!".format(backup_file, self.RESTORE_RETRIES))
-
-    def _downloadBackup(self, cluster_object: V1MongoClusterConfiguration, backup_file: str) -> str:
-        """
-        Downloads the backup file from cloud storage.
-        :param cluster_object: The cluster object from the YAML file.
-        :param backup_file: The file name of the backup to download.
-        :return: The location of the downloaded file.
-        """
-        prefix = cluster_object.spec.backups.gcs.prefix or self.DEFAULT_BACKUP_PREFIX
-        restore_bucket = cluster_object.spec.backups.gcs.restore_bucket or cluster_object.spec.backups.gcs.bucket
-        return self._downloadFile(
-            credentials=self._getCredentials(cluster_object),
-            bucket_name=restore_bucket,
-            key="{}/{}".format(prefix, backup_file),
-            file_name="/tmp/" + backup_file
-        )
-
-    @staticmethod
-    def _downloadFile(credentials: dict, bucket_name: str, key: str, file_name: str) -> str:
-        """
-        Downloads a file from cloud storage.
-        :param credentials: The Google cloud storage service credentials retrieved from the Kubernetes secret.
-        :param bucket_name: The name of the bucket.
-        :param key: The key to download the file from the cloud storage.
-        :param file_name: The file that will be downloaded.
-        :return: The location of the downloaded file.
-        """
-        credentials = ServiceCredentials.from_service_account_info(credentials)
-        gcs_client = StorageClient(credentials.project_id, credentials)
-        bucket = gcs_client.get_bucket(bucket_name)
-        logging.info("Going to download gcs://%s/%s", bucket_name, key)
-
-        bucket.blob(key).download_to_filename(file_name)
-
-        logging.info("Backup gcs://%s/%s downloaded to %s", bucket_name, key, file_name)
-        return file_name

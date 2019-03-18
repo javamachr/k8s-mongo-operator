@@ -2,6 +2,7 @@
 # !/usr/bin/env python
 # -*- coding: utf-8 -*-
 import logging
+from os import environ
 from time import sleep
 from unittest.mock import patch
 import yaml
@@ -9,10 +10,11 @@ import yaml
 from typing import Dict, Optional
 
 from kubernetes.config import load_incluster_config
-from kubernetes import client
+from kubernetes import client, watch
 from kubernetes.client import Configuration, V1DeleteOptions, V1ServiceList, V1StatefulSetList, V1SecretList, \
     V1beta1CustomResourceDefinition
 from kubernetes.client.rest import ApiException
+from kubernetes.watch import Watch
 
 from Settings import Settings
 from mongoOperator.helpers.IgnoreIfExists import IgnoreIfExists
@@ -44,6 +46,22 @@ class KubernetesService:
         self.custom_objects_api = client.CustomObjectsApi(self.api_client)
         self.extensions_api = client.ApiextensionsV1beta1Api(self.api_client)
         self.apps_api = client.AppsV1beta1Api(self.api_client)
+
+    def streamPodsOperatedByMe(self, watch: Watch):
+        """
+        Stream events emited by pods operated by this operator.
+        :param watch: watch object to use.
+        :return: stream of Events related to given pods
+        """
+        return watch.stream(self.core_api.list_namespaced_pod, namespace=environ['KUBERNETES_NAMESPACE'], label_selector='operated-by=operators.javamachr.cz')
+
+    def streamStatefulSetsOperatedByMe(self, watch: Watch):
+        """
+        Stream events emited by StatefulSet operated by this operator.
+        :param watch: watch object to use.
+        :return: stream of Events related to given StatefulSets
+        """
+        return watch.stream(self.apps_api.list_namespaced_stateful_set,namespace=environ['KUBERNETES_NAMESPACE'], label_selector='operated-by=operators.javamachr.cz')
 
     def createMongoObjectDefinition(self) -> V1beta1CustomResourceDefinition:
         """Create the custom resource definition."""
@@ -179,12 +197,24 @@ class KubernetesService:
 
     def createService(self, cluster_object: V1MongoClusterConfiguration) -> Optional[client.V1Service]:
         """
-        Creates the given cluster.
+        Creates the given service.
         :param cluster_object: The cluster object from the YAML file.
         :return: The created service.
         """
         namespace = cluster_object.metadata.namespace
         body = KubernetesResources.createService(cluster_object)
+        logging.info("Creating service %s @ ns/%s.", body.metadata.name, namespace)
+        with IgnoreIfExists():
+            return self.core_api.create_namespaced_service(namespace, body)
+
+    def createHeadlessService(self, cluster_object: V1MongoClusterConfiguration) -> Optional[client.V1Service]:
+        """
+        Creates the given headless service.
+        :param cluster_object: The cluster object from the YAML file.
+        :return: The created service.
+        """
+        namespace = cluster_object.metadata.namespace
+        body = KubernetesResources.createHeadlessService(cluster_object)
         logging.info("Creating service %s @ ns/%s.", body.metadata.name, namespace)
         with IgnoreIfExists():
             return self.core_api.create_namespaced_service(namespace, body)
@@ -198,6 +228,18 @@ class KubernetesService:
         name = cluster_object.metadata.name
         namespace = cluster_object.metadata.namespace
         body = KubernetesResources.createService(cluster_object)
+        logging.info("Updating service %s @ ns/%s.", name, namespace)
+        return self.core_api.patch_namespaced_service(name, namespace, body)
+
+    def updateHeadlessService(self, cluster_object: V1MongoClusterConfiguration) -> client.V1Service:
+        """
+        Updates the headless service.
+        :param cluster_object: The cluster object from the YAML file.
+        :return: The updated service.
+        """
+        name = "svc-" + cluster_object.metadata.name + "-internal"
+        namespace = cluster_object.metadata.namespace
+        body = KubernetesResources.createHeadlessService(cluster_object)
         logging.info("Updating service %s @ ns/%s.", name, namespace)
         return self.core_api.patch_namespaced_service(name, namespace, body)
 
@@ -247,6 +289,8 @@ class KubernetesService:
         name = cluster_object.metadata.name
         namespace = cluster_object.metadata.namespace
         body = KubernetesResources.createStatefulSet(cluster_object)
+        body._api_version = "apps/v1beta1"
+        body._kind = "StatefulSet"
         logging.info("Updating stateful set %s @ ns/%s.", name, namespace)
         return self.apps_api.patch_namespaced_stateful_set(name, namespace, body)
 

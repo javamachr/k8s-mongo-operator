@@ -21,7 +21,7 @@ class MongoResources:
         :param namespace: The namespace of the cluster.
         :return: The name of the host.
         """
-        return "{cluster_name}-{pod_index}.{cluster_name}.{namespace}.svc.cluster.local".format(
+        return "{cluster_name}-{pod_index}.svc-{cluster_name}-internal.{namespace}.svc.cluster.local".format(
             pod_index=pod_index, namespace=namespace, cluster_name=cluster_name)
 
     @classmethod
@@ -64,8 +64,8 @@ class MongoResources:
         :param admin_credentials: The admin credentials secret model.
         :return: The command to be sent to MongoDB.
         """
-        admin_username = b64decode(admin_credentials.data["username"]).decode("utf-8")
-        admin_password = b64decode(admin_credentials.data["password"]).decode("utf-8")
+        admin_username = "admin"
+        admin_password = b64decode(admin_credentials.data["database-admin-password"]).decode("utf-8")
         kwargs = {
             "pwd": admin_password,
             "roles": [
@@ -108,6 +108,6 @@ class MongoResources:
         replicas = cluster_object.spec.mongodb.replicas
         return {
             "_id": name,
-            "version": 1,
+            "version": 2,
             "members": [{"_id": i, "host": cls.getMemberHostname(i, name, namespace)} for i in range(replicas)],
         }

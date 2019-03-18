@@ -4,7 +4,7 @@
 from unittest import TestCase
 from unittest.mock import MagicMock
 
-from mongoOperator.helpers.resourceCheckers.ServiceChecker import ServiceChecker
+from mongoOperator.helpers.resourceCheckers.ServiceChecker import HeadlessServiceChecker
 from mongoOperator.models.V1MongoClusterConfiguration import V1MongoClusterConfiguration
 from tests.test_utils import getExampleClusterDefinition
 
@@ -14,7 +14,7 @@ class TestServiceChecker(TestCase):
     def setUp(self):
         super().setUp()
         self.kubernetes_service = MagicMock()
-        self.checker = ServiceChecker(self.kubernetes_service)
+        self.checker = HeadlessServiceChecker(self.kubernetes_service)
         self.cluster_object = V1MongoClusterConfiguration(**getExampleClusterDefinition())
 
     def test_listResources(self):

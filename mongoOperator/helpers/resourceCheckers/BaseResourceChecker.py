@@ -72,7 +72,7 @@ class BaseResourceChecker:
                     raise
 
             # The service exists but the Mongo object it belonged to does not, we have to delete it.
-            self.deleteResource(cluster_name, namespace)
+            #self.deleteResource(cluster_name, namespace)
 
     @abstractmethod
     def listResources(self) -> List[GenericType]:
