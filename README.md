@@ -44,10 +44,10 @@ spec:
     admin_password: admin
     user_name: webapp
     user_password: passwd1
-    databasename: fortunaweb
+    databasename: web
   mongodb:
     cpu_limit: 1000m
-    host_path: /mongodb/bm-cz/bet
+    host_path: /mongodb/data
     memory_limit: 2048Mi
     replicas: 3
     run_as_user: 50002
